@@ -258,7 +258,7 @@ NUM_EPISODES = 10000000
 NUM_WARMSTART = 500
 FRAME_HISTORY_SIZE = 4
 MAX_NOOP_ITERS = 30
-PROGRESS_INTERVAL = 1000
+PROGRESS_INTERVAL = 100
 stats = Stats()
 frame_buffer = FrameBuffer(FRAME_HISTORY_SIZE)
 
@@ -353,6 +353,7 @@ for i_episode in range(NUM_WARMSTART + NUM_EPISODES):
                 torch.save({"i_episode":i_episode,
                             "policy_net_sd":policy_net.state_dict(),
                             "optimizer_sd":optimizer.state_dict()}, './checkpoint/' + RUN_NAME + '.pt')
+                stats.best_success_count = stats.success_count
 
         # Reset stats for next progress interval
         stats.reset()
