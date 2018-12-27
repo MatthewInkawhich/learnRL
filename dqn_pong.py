@@ -20,7 +20,7 @@ import torchvision.transforms as T
 ##################################################################
 ### Initialize Enviroment
 ##################################################################
-RUN_NAME = "test1"
+RUN_NAME = "test2"
 # Initialize gym environment
 env = gym.make('Pong-v0')
 # print(env.action_space)
@@ -115,7 +115,7 @@ class FrameBuffer:
 
     def get_frame_tensor(self):
         assert(self.is_full()), "Attempted to get_frames when buffer is not full"
-        return torch.stack(list(self.buffer)).unsqueeze_(0)
+        return torch.stack(list(self.buffer)).unsqueeze_(0).to(device)
 
     def plot(self):
         assert(self.is_full()), "Attempted to get_frames when buffer is not full"
@@ -153,14 +153,14 @@ GAMMA = 0.999
 ANNEAL_TO = 0.1
 ANNEAL_OVER = 1000000
 ANNEAL_STEP = (EPSILON - ANNEAL_TO) / ANNEAL_OVER
-TARGET_UPDATE = 10000
+TARGET_UPDATE = 1000
 
 policy_net = DQN().to(device)
 target_net = DQN().to(device)
 target_net.load_state_dict(policy_net.state_dict())
 target_net.eval()
 
-optimizer = optim.RMSprop(policy_net.parameters())
+optimizer = optim.RMSprop(policy_net.parameters(), lr=0.00005)
 memory = ReplayMemory(100000)
 
 
@@ -195,7 +195,7 @@ def optimize_model():
     # Handle next states
     next_state_list = list(next_state_tuple)
     # Compute a mask of non-final states and concatenate the batch elements
-    non_final_mask = torch.tensor(map(lambda s: s is not None, next_state_list), device=device, dtype=torch.uint8)
+    non_final_mask = torch.tensor(list(map(lambda s: s is not None, next_state_list)), device=device, dtype=torch.uint8)
     non_final_next_states = torch.cat([s for s in next_state_list if s is not None])
 
     # Create batch tensors from these tuples
@@ -255,7 +255,7 @@ class Stats:
 
 
 NUM_EPISODES = 10000000
-NUM_WARMSTART = 1000
+NUM_WARMSTART = 500
 FRAME_HISTORY_SIZE = 4
 MAX_NOOP_ITERS = 30
 PROGRESS_INTERVAL = 1000
@@ -326,7 +326,7 @@ for i_episode in range(NUM_WARMSTART + NUM_EPISODES):
 
         # If done...
         if next_state is None:
-            print("Episode done!! Reward:", reward.item())
+            #print("Episode done!! Reward:", reward.item())
             break
 
     # Print statistics and save checkpoint if it is best one yet
