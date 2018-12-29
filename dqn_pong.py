@@ -20,12 +20,13 @@ import torchvision.transforms as T
 ##################################################################
 ### Initialize Enviroment
 ##################################################################
-RUN_NAME = "test2"
+RUN_NAME = "test3"
 # Initialize gym environment
 env = gym.make('Pong-v0')
 # print(env.action_space)
 # print(env.unwrapped.get_action_meanings())
 NUM_ACTIONS = 3
+FRAME_HISTORY_SIZE = 4
 
 # Pong-specific action mapping. Must map model output argmax {0, 1, 2} to the action
 # indexes used by the environment
@@ -39,7 +40,14 @@ action_translator = {0:0, 1:2, 2:3}
 # if gpu is to be used
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-
+# Open csv progress file
+WRITE_CSV = True
+if WRITE_CSV:
+    csv_file = open("./logs/" + RUN_NAME + ".csv", "w")
+    field_names = ["episode", "success_rate", "avg_iters_per_episode", "total_reward", "avg_loss", "0", "1", "2"]
+    csv_writer = csv.DictWriter(csv_file, fieldnames=field_names, delimiter=',')
+    csv_writer.writeheader()
+    csv_file.flush()
 
 ##################################################################
 ### Replay Memory
@@ -77,7 +85,7 @@ class ReplayMemory(object):
 class DQN(nn.Module):
     def __init__(self):
         super(DQN, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels=4, out_channels=16, kernel_size=8, stride=4)
+        self.conv1 = nn.Conv2d(in_channels=FRAME_HISTORY_SIZE, out_channels=16, kernel_size=8, stride=4)
         self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=4, stride=2)
         self.fc1 = nn.Linear(in_features=32*9*9 , out_features=256)
         self.fc2 = nn.Linear(in_features=256, out_features=NUM_ACTIONS)
@@ -184,8 +192,7 @@ def optimize_model():
     if len(memory) < BATCH_SIZE:
         print("Memory does not contain enough samples to make a batch!")
         print("len(memory) = " + str(len(memory)) + "\tBATCH_SIZE = " + str(BATCH_SIZE))
-        return
-
+        return torch.tensor(0, device=device)
 
     # Sample a batch from replay memory
     transitions = memory.sample(BATCH_SIZE)
@@ -247,7 +254,7 @@ class Stats:
 
     def reset(self):
         self.success_count = 0
-        self.total_episode_count = 0
+        self.total_volley_count = 0
         self.total_iter_count = 0
         self.total_reward = 0
         self.total_loss = 0
@@ -255,8 +262,7 @@ class Stats:
 
 
 NUM_EPISODES = 10000000
-NUM_WARMSTART = 500
-FRAME_HISTORY_SIZE = 4
+NUM_WARMSTART = 25
 MAX_NOOP_ITERS = 30
 PROGRESS_INTERVAL = 100
 stats = Stats()
@@ -292,21 +298,24 @@ for i_episode in range(NUM_WARMSTART + NUM_EPISODES):
         atari_action = action_translator[action.item()]
         #print("atari action:", atari_action)
         # Perform the action
-        _, reward, _, _ = env.step(atari_action)
+        _, reward, done, _ = env.step(atari_action)
         reward = torch.tensor([reward], device=device)
 
         # Update frame_buffer
         curr_frame = process_frame()
         frame_buffer.push(curr_frame)
 
-        # Set next_state depending on reward
-        if (reward == 0):
-            next_state = frame_buffer.get_frame_tensor()
-        else:
+        # Set next_state depending on done
+        if done:
             next_state = None
+        else:
+            next_state = frame_buffer.get_frame_tensor()
+
+        # Update stats if volley is over
+        if (reward != 0):
             if reward > 0:
                 stats.success_count += 1
-            stats.total_episode_count += 1
+            stats.total_volley_count += 1
             stats.total_reward += reward.item()
 
         # Store the transition in memory
@@ -325,7 +334,7 @@ for i_episode in range(NUM_WARMSTART + NUM_EPISODES):
             stats.reset()
 
         # If done...
-        if next_state is None:
+        if done:
             #print("Episode done!! Reward:", reward.item())
             break
 
@@ -336,14 +345,27 @@ for i_episode in range(NUM_WARMSTART + NUM_EPISODES):
             print("*************************************")
             print("Episode:", i_episode)
             print("Last {} episodes...".format(PROGRESS_INTERVAL))
-            print("Success: {}/{} = {}".format(stats.success_count, stats.total_episode_count, stats.success_count/stats.total_episode_count))
-            print("Avg. iters per episode:", stats.total_iter_count/stats.total_episode_count)
+            print("Success: {}/{} = {}".format(stats.success_count, stats.total_volley_count, stats.success_count/stats.total_volley_count))
+            print("Avg. iters per episode:", stats.total_iter_count/stats.total_volley_count)
             print("Total reward:", stats.total_reward)
             print("Avg. loss:", stats.total_loss/stats.total_iter_count)
             print("Action counts:")
             for i in range(NUM_ACTIONS):
                 print("{}:{}".format(i, stats.action_counts[i]))
             print("*************************************")
+
+            # Write csv row
+            if WRITE_CSV:
+                csv_writer.writerow({'episode': i_episode - NOOP_EPISODES,
+                                     'success_rate': stats.success_count/stats.total_volley_count,
+                                     'avg_iters_per_episode': stats.total_iter_count/stats.total_volley_count,
+                                     'total_reward': stats.total_reward,
+                                     'avg_loss': stats.total_loss/stats.total_iter_count,
+                                     '0': action_counts[0],
+                                     '1': action_counts[1],
+                                     '2': action_counts[2]})
+
+                csv_file.flush()
 
             # Save checkpoint if it is best one yet
             if stats.success_count > stats.best_success_count:
