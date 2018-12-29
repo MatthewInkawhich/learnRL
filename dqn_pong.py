@@ -9,6 +9,7 @@ import os
 import math
 import random
 import cv2
+import csv
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
@@ -161,7 +162,7 @@ GAMMA = 0.999
 ANNEAL_TO = 0.1
 ANNEAL_OVER = 1000000
 ANNEAL_STEP = (EPSILON - ANNEAL_TO) / ANNEAL_OVER
-TARGET_UPDATE = 1000
+TARGET_UPDATE = 50
 
 policy_net = DQN().to(device)
 target_net = DQN().to(device)
@@ -262,9 +263,10 @@ class Stats:
 
 
 NUM_EPISODES = 10000000
-NUM_WARMSTART = 25
+#NUM_WARMSTART = 25
+NUM_WARMSTART = 0
 MAX_NOOP_ITERS = 30
-PROGRESS_INTERVAL = 100
+PROGRESS_INTERVAL = 1
 stats = Stats()
 frame_buffer = FrameBuffer(FRAME_HISTORY_SIZE)
 
@@ -356,14 +358,14 @@ for i_episode in range(NUM_WARMSTART + NUM_EPISODES):
 
             # Write csv row
             if WRITE_CSV:
-                csv_writer.writerow({'episode': i_episode - NOOP_EPISODES,
+                csv_writer.writerow({'episode': i_episode,
                                      'success_rate': stats.success_count/stats.total_volley_count,
                                      'avg_iters_per_episode': stats.total_iter_count/stats.total_volley_count,
                                      'total_reward': stats.total_reward,
                                      'avg_loss': stats.total_loss/stats.total_iter_count,
-                                     '0': action_counts[0],
-                                     '1': action_counts[1],
-                                     '2': action_counts[2]})
+                                     '0': stats.action_counts[0],
+                                     '1': stats.action_counts[1],
+                                     '2': stats.action_counts[2]})
 
                 csv_file.flush()
 
@@ -386,5 +388,7 @@ for i_episode in range(NUM_WARMSTART + NUM_EPISODES):
     if i_episode % TARGET_UPDATE == 0:
         target_net.load_state_dict(policy_net.state_dict())
 
+if WRITE_CSV:
+    csv_file.close()
 
 print("Finished!")
