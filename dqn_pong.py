@@ -166,10 +166,10 @@ ANNEAL_TO = 0.1
 ANNEAL_OVER = 1000000   # time steps
 ANNEAL_STEP = (EPSILON - ANNEAL_TO) / ANNEAL_OVER
 NUM_EPISODES = 10000000
-NUM_WARMSTART = 35      # episodes
+NUM_WARMSTART = 0      # episodes
 MAX_NOOP_ITERS = 30
 TARGET_UPDATE = 10000     # time steps
-PROGRESS_INTERVAL = 100   # episodes
+PROGRESS_INTERVAL = 1   # episodes
 
 policy_net = DQN().to(device)
 target_net = DQN().to(device)
