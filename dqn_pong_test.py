@@ -21,7 +21,7 @@ import torchvision.transforms as T
 ##################################################################
 ### Initialize Enviroment
 ##################################################################
-PATH = "checkpoint/test2.pt"
+PATH = "checkpoint/test3.pt"
 # Initialize gym environment
 env = gym.make('Pong-v0')
 # print(env.action_space)

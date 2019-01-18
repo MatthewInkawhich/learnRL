@@ -21,7 +21,7 @@ import torchvision.transforms as T
 ##################################################################
 ### Initialize Enviroment
 ##################################################################
-RUN_NAME = "test3"
+RUN_NAME = "dqn_pong_1"
 # Initialize gym environment
 env = gym.make('Pong-v0')
 # print(env.action_space)
@@ -44,8 +44,10 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # Open csv progress file
 WRITE_CSV = True
 if WRITE_CSV:
+    if not os.path.isdir('logs'):
+        os.mkdir('logs')
     csv_file = open("./logs/" + RUN_NAME + ".csv", "w")
-    field_names = ["episode", "success_rate", "avg_iters_per_episode", "total_reward", "avg_loss", "0", "1", "2"]
+    field_names = ["episode", "iteration", "volley_success_rate", "game_success_rate", "avg_iters_per_episode", "total_reward", "avg_loss", "0", "1", "2"]
     csv_writer = csv.DictWriter(csv_file, fieldnames=field_names, delimiter=',')
     csv_writer.writeheader()
     csv_file.flush()
@@ -156,22 +158,30 @@ def process_frame():
 ### Training Setup
 ##################################################################
 BATCH_SIZE = 32
+REPLAY_MEMORY_SIZE = 1000000
 DOUBLE_DQN = False
 EPSILON = 1.0
-GAMMA = 0.999
+GAMMA = 0.99
 ANNEAL_TO = 0.1
-ANNEAL_OVER = 1000000
+ANNEAL_OVER = 1000000   # time steps
 ANNEAL_STEP = (EPSILON - ANNEAL_TO) / ANNEAL_OVER
-TARGET_UPDATE = 50
+NUM_EPISODES = 10000000
+NUM_WARMSTART = 35      # episodes
+MAX_NOOP_ITERS = 30
+TARGET_UPDATE = 10000     # time steps
+PROGRESS_INTERVAL = 100   # episodes
 
 policy_net = DQN().to(device)
 target_net = DQN().to(device)
 target_net.load_state_dict(policy_net.state_dict())
 target_net.eval()
 
-optimizer = optim.RMSprop(policy_net.parameters(), lr=0.00005)
-memory = ReplayMemory(100000)
+optimizer = optim.RMSprop(policy_net.parameters(), lr=0.00025, momentum=0.95, eps=0.01)
+memory = ReplayMemory(REPLAY_MEMORY_SIZE)
 
+# Select an action randomly without annealing EPSILON
+def select_random_action():
+    return torch.tensor([[random.randrange(NUM_ACTIONS)]], device=device, dtype=torch.long)
 
 # Select an action with epsilon greedy exploration policy.
 def select_action(state):
@@ -185,15 +195,15 @@ def select_action(state):
             ans = policy_net(state).max(1)[1].view(1, 1)
     else:
         # Choose random action
-        ans = torch.tensor([[random.randrange(NUM_ACTIONS)]], device=device, dtype=torch.long)
+        ans = select_random_action()
     return ans
 
-
+# This function is responsible for one optimization step of the DQN
 def optimize_model():
     if len(memory) < BATCH_SIZE:
         print("Memory does not contain enough samples to make a batch!")
         print("len(memory) = " + str(len(memory)) + "\tBATCH_SIZE = " + str(BATCH_SIZE))
-        return torch.tensor(0, device=device)
+        return 0
 
     # Sample a batch from replay memory
     transitions = memory.sample(BATCH_SIZE)
@@ -249,23 +259,23 @@ def optimize_model():
 ##################################################################
 class Stats:
     def __init__(self):
-        self.ready = False
-        self.best_success_count = 0
+        self.hard_reset()
+
+    def hard_reset(self):
+        self.best_total_reward = 0
+        self.total_iter_count = 0
         self.reset()
 
     def reset(self):
+        self.episode_count = 0
         self.success_count = 0
+        self.volley_success_count = 0
         self.total_volley_count = 0
-        self.total_iter_count = 0
         self.total_reward = 0
         self.total_loss = 0
         self.action_counts = [0] * NUM_ACTIONS
 
 
-NUM_EPISODES = 10000000
-NUM_WARMSTART = 25
-MAX_NOOP_ITERS = 30
-PROGRESS_INTERVAL = 100
 stats = Stats()
 frame_buffer = FrameBuffer(FRAME_HISTORY_SIZE)
 
@@ -281,6 +291,8 @@ def run_noop_iters():
 
 # Training loop
 for i_episode in range(NUM_WARMSTART + NUM_EPISODES):
+    # Increment episode count
+    stats.episode_count += 1
     # Reset env for new episode
     env.reset()
     # Run noop iterations
@@ -288,106 +300,120 @@ for i_episode in range(NUM_WARMSTART + NUM_EPISODES):
     # Get initial state
     state = frame_buffer.get_frame_tensor()
 
-    # Run episode until someone scores or a max MAX_TIMESTEPS limit is hit
+    # Run time steps until someone wins the game
     for t in count():
+        # Increment iteration count
         stats.total_iter_count += 1
-        # Select an action
-        action = select_action(state)
-        #print("action:", action, action.item())
-        stats.action_counts[action.item()] += 1
+
+        # ******** Select an action ********
+        # If after WARMSTART_EPISODES, select action using epsilon greedy
+        if i_episode >= NUM_WARMSTART:
+            action = select_action(state)
+            stats.action_counts[action.item()] += 1
+        else:
+            # Else, select a random action
+            action = select_random_action()
         # Translate [0,2] action space to atari action space {0, 2, 3}
         atari_action = action_translator[action.item()]
-        #print("atari action:", atari_action)
-        # Perform the action
+
+        # ******** Perform the action ********
         _, reward, done, _ = env.step(atari_action)
         reward = torch.tensor([reward], device=device)
 
         # Update frame_buffer
         curr_frame = process_frame()
         frame_buffer.push(curr_frame)
+        #frame_buffer.plot()
 
-        # Set next_state depending on done
+        # ******** Configure next_state ********
         if done:
             next_state = None
         else:
             next_state = frame_buffer.get_frame_tensor()
 
-        # Update stats if volley is over
-        if (reward != 0):
+        # ******** Update stats if volley is over ********
+        if reward != 0:
             if reward > 0:
-                stats.success_count += 1
+                stats.volley_success_count += 1
+                print("Won volley")
+            else:
+                print("Lost volley")
             stats.total_volley_count += 1
             stats.total_reward += reward.item()
 
-        # Store the transition in memory
+        # ******** Store the transition in memory ********
         memory.push(state, action, next_state, reward)
 
-        # Update state
+        # ******** Update state ********
         state = next_state
 
-        # Perform an optimization step if not in the warmstart stage
+        # ******** Perform an optimization step if not in the warmstart stage ********
         if i_episode >= NUM_WARMSTART:
             #print("done with warmstart stage...")
-            #print("len(memory):", len(memory))
+            #print("memory size:", len(memory))
             stats.total_loss += optimize_model()
         else:
-            # Warmstart iter... clear stats
-            stats.reset()
+            # If we are in warmstart episode, hard reset stats
+            stats.hard_reset()
 
-        # If done...
+        # ******** Update the target network if it's time ********
+        if stats.total_iter_count != 0 and stats.total_iter_count % TARGET_UPDATE == 0:
+            target_net.load_state_dict(policy_net.state_dict())
+
+        # ******** If done, break out of iteration loop ********
         if done:
-            #print("Episode done!! Reward:", reward.item())
+            if reward > 0:
+                stats.success_count += 1
             break
 
+
     # Print statistics and save checkpoint if it is best one yet
-    if i_episode > NUM_WARMSTART and i_episode % PROGRESS_INTERVAL == 0:
+    if stats.episode_count == PROGRESS_INTERVAL:
         # Print stats
-        if stats.ready:
-            print("*************************************")
-            print("Episode:", i_episode)
-            print("Last {} episodes...".format(PROGRESS_INTERVAL))
-            print("Success: {}/{} = {}".format(stats.success_count, stats.total_volley_count, stats.success_count/stats.total_volley_count))
-            print("Avg. iters per episode:", stats.total_iter_count/stats.total_volley_count)
-            print("Total reward:", stats.total_reward)
-            print("Avg. loss:", stats.total_loss/stats.total_iter_count)
-            print("Action counts:")
-            for i in range(NUM_ACTIONS):
-                print("{}:{}".format(i, stats.action_counts[i]))
-            print("*************************************")
+        print("*************************************")
+        print("Last {} episodes...".format(PROGRESS_INTERVAL))
+        print("Episode:", i_episode)
+        print("Iteration:", stats.total_iter_count)
+        print("Volley Success: {}/{} = {}".format(stats.volley_success_count, stats.total_volley_count, stats.volley_success_count/stats.total_volley_count))
+        print("Game Success: {}/{} = {}".format(stats.success_count, PROGRESS_INTERVAL, stats.success_count/PROGRESS_INTERVAL))
+        print("Avg. iters per episode:", stats.total_iter_count/PROGRESS_INTERVAL)
+        print("Total reward:", stats.total_reward)
+        print("Avg. loss:", stats.total_loss/stats.total_iter_count)
+        print("Action counts:")
+        for i in range(NUM_ACTIONS):
+            print("{}:{}".format(i, stats.action_counts[i]))
+        print("*************************************")
 
-            # Write csv row
-            if WRITE_CSV:
-                csv_writer.writerow({'episode': i_episode,
-                                     'success_rate': stats.success_count/stats.total_volley_count,
-                                     'avg_iters_per_episode': stats.total_iter_count/stats.total_volley_count,
-                                     'total_reward': stats.total_reward,
-                                     'avg_loss': stats.total_loss/stats.total_iter_count,
-                                     '0': stats.action_counts[0],
-                                     '1': stats.action_counts[1],
-                                     '2': stats.action_counts[2]})
+        # Write csv row
+        if WRITE_CSV:
+            csv_writer.writerow({'episode': i_episode,
+                                 'iteration': stats.total_iter_count,
+                                 'volley_success_rate': stats.volley_success_count/stats.total_volley_count,
+                                 'game_success_rate': stats.success_count/PROGRESS_INTERVAL,
+                                 'avg_iters_per_episode': stats.total_iter_count/PROGRESS_INTERVAL,
+                                 'total_reward': stats.total_reward,
+                                 'avg_loss': stats.total_loss/stats.total_iter_count,
+                                 '0': stats.action_counts[0],
+                                 '1': stats.action_counts[1],
+                                 '2': stats.action_counts[2]})
 
-                csv_file.flush()
+            csv_file.flush()
 
-            # Save checkpoint if it is best one yet
-            if stats.success_count > stats.best_success_count:
-                print("Saving model...")
-                if not os.path.isdir('checkpoint'):
-                    os.mkdir('checkpoint')
-                torch.save({"i_episode":i_episode,
-                            "policy_net_sd":policy_net.state_dict(),
-                            "optimizer_sd":optimizer.state_dict()}, './checkpoint/' + RUN_NAME + '.pt')
-                stats.best_success_count = stats.success_count
+        # Save checkpoint if it is best one yet
+        if stats.total_reward > stats.best_total_reward:
+            print("Saving model...")
+            if not os.path.isdir('checkpoints'):
+                os.mkdir('checkpoints')
+            torch.save({"i_episode":i_episode,
+                        "policy_net_sd":policy_net.state_dict(),
+                        "optimizer_sd":optimizer.state_dict()}, './checkpoints/' + RUN_NAME + '.pt')
+            stats.best_total_reward = stats.total_reward
 
         # Reset stats for next progress interval
         stats.reset()
-        stats.ready = True
 
-
-    # Update the target network
-    if i_episode % TARGET_UPDATE == 0:
-        target_net.load_state_dict(policy_net.state_dict())
 
 if WRITE_CSV:
     csv_file.close()
 
-print("Finished!")
+print("Training Complete!")
