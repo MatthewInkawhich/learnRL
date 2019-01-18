@@ -150,8 +150,13 @@ def process_frame():
     screen = env.render(mode='rgb_array')
     gray = cv2.cvtColor(screen, cv2.COLOR_BGR2GRAY)
     gray = cv2.resize(gray, (84, 110))[18:102,:]
-    return torch.tensor(gray, dtype=torch.float32) / 255
+    #return torch.tensor(gray, dtype=torch.float32) / 255
+    return torch.tensor(gray, dtype=torch.uint8)
 
+# This function takes a 4x84x84 uint8 state, and returns the same state of
+# type torch.float32, and normalized between 0 and 1.
+def prep_state_for_model(state):
+    return torch.tensor(state, dtype=torch.float32) / 255
 
 
 ##################################################################
@@ -191,6 +196,7 @@ def select_action(state):
         EPSILON -= ANNEAL_STEP
     if (sample > EPSILON):
         # Choose greedy action
+        state = prep_state_for_model(state)
         with torch.no_grad():
             ans = policy_net(state).max(1)[1].view(1, 1)
     else:
@@ -221,10 +227,14 @@ def optimize_model():
     action_batch = torch.cat(action_tuple)
     reward_batch = torch.cat(reward_tuple)
 
+    # Cast and normalize state_batch before forwarding thru policy_net
+    state_batch = prep_state_for_model(state_batch)
     # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
     # values of the actions that we actually took.
     predicted_q_values = policy_net(state_batch).gather(1, action_batch)
 
+    # Cast and normalize non_final_next_states before forwarding thru target_net
+    non_final_next_states = prep_state_for_model(non_final_next_states)
     if DOUBLE_DQN:
         next_state_q_values = torch.zeros(BATCH_SIZE, device=device)
         # Compute argmax Q(s', a) (using policy net) for Double DQN
