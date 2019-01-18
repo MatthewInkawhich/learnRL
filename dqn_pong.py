@@ -158,7 +158,7 @@ def process_frame():
 ### Training Setup
 ##################################################################
 BATCH_SIZE = 32
-REPLAY_MEMORY_SIZE = 1000000
+REPLAY_MEMORY_SIZE = 100000
 DOUBLE_DQN = False
 EPSILON = 1.0
 GAMMA = 0.99
@@ -169,7 +169,7 @@ NUM_EPISODES = 10000000
 NUM_WARMSTART = 35      # episodes
 MAX_NOOP_ITERS = 30
 TARGET_UPDATE = 10000     # time steps
-PROGRESS_INTERVAL = 100   # episodes
+PROGRESS_INTERVAL = 10   # episodes
 
 policy_net = DQN().to(device)
 target_net = DQN().to(device)
@@ -335,9 +335,9 @@ for i_episode in range(NUM_WARMSTART + NUM_EPISODES):
         if reward != 0:
             if reward > 0:
                 stats.volley_success_count += 1
-                print("Won volley")
-            else:
-                print("Lost volley")
+                #print("Won volley")
+            #else:
+            #    print("Lost volley")
             stats.total_volley_count += 1
             stats.total_reward += reward.item()
 
@@ -372,7 +372,7 @@ for i_episode in range(NUM_WARMSTART + NUM_EPISODES):
         # Print stats
         print("*************************************")
         print("Last {} episodes...".format(PROGRESS_INTERVAL))
-        print("Episode:", i_episode)
+        print("Episode:", i_episode - NUM_WARMSTART)
         print("Iteration:", stats.total_iter_count)
         print("Volley Success: {}/{} = {}".format(stats.volley_success_count, stats.total_volley_count, stats.volley_success_count/stats.total_volley_count))
         print("Game Success: {}/{} = {}".format(stats.success_count, PROGRESS_INTERVAL, stats.success_count/PROGRESS_INTERVAL))
@@ -386,7 +386,7 @@ for i_episode in range(NUM_WARMSTART + NUM_EPISODES):
 
         # Write csv row
         if WRITE_CSV:
-            csv_writer.writerow({'episode': i_episode,
+            csv_writer.writerow({'episode': i_episode - NUM_WARMSTART,
                                  'iteration': stats.total_iter_count,
                                  'volley_success_rate': stats.volley_success_count/stats.total_volley_count,
                                  'game_success_rate': stats.success_count/PROGRESS_INTERVAL,
