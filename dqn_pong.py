@@ -21,7 +21,7 @@ import torchvision.transforms as T
 ##################################################################
 ### Initialize Enviroment
 ##################################################################
-RUN_NAME = "dqn_pong_1"
+RUN_NAME = "dqn_pong_9"
 # Initialize gym environment
 env = gym.make('Pong-v0')
 # print(env.action_space)
@@ -85,23 +85,40 @@ class ReplayMemory(object):
 ##################################################################
 ### Define Model
 ##################################################################
+#class DQN(nn.Module):
+#    def __init__(self):
+#        super(DQN, self).__init__()
+#        self.conv1 = nn.Conv2d(in_channels=FRAME_HISTORY_SIZE, out_channels=16, kernel_size=8, stride=4)
+#        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=4, stride=2)
+#        self.fc1 = nn.Linear(in_features=32*9*9 , out_features=256)
+#        self.fc2 = nn.Linear(in_features=256, out_features=NUM_ACTIONS)
+#
+#    def forward(self, x):
+#        x = F.relu(self.conv1(x))
+#        x = F.relu(self.conv2(x))
+#        x = x.view(-1, 32 * 9 * 9)
+#        x = F.relu(self.fc1(x))
+#        x = self.fc2(x)
+#        return x    # return Q values of each action
+
+
 class DQN(nn.Module):
     def __init__(self):
         super(DQN, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels=FRAME_HISTORY_SIZE, out_channels=16, kernel_size=8, stride=4)
-        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=4, stride=2)
-        self.fc1 = nn.Linear(in_features=32*9*9 , out_features=256)
-        self.fc2 = nn.Linear(in_features=256, out_features=NUM_ACTIONS)
+        self.conv1 = nn.Conv2d(in_channels=FRAME_HISTORY_SIZE, out_channels=32, kernel_size=8, stride=4)
+        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)
+        self.conv3 = nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1)
+        self.fc1 = nn.Linear(in_features=64*7*7 , out_features=512)
+        self.fc2 = nn.Linear(in_features=512, out_features=NUM_ACTIONS)
 
     def forward(self, x):
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
-        x = x.view(-1, 32 * 9 * 9)
+        x = F.relu(self.conv3(x))
+        x = x.view(-1, 64 * 7 * 7)
         x = F.relu(self.fc1(x))
         x = self.fc2(x)
         return x    # return Q values of each action
-
-
 
 ##################################################################
 ### Frame processing
@@ -156,7 +173,7 @@ def process_frame():
 # This function takes a 4x84x84 uint8 state, and returns the same state of
 # type torch.float32, and normalized between 0 and 1.
 def prep_state_for_model(state):
-    return torch.tensor(state, dtype=torch.float32) / 255
+    return torch.tensor(state, dtype=torch.float32, device=device) / 255
 
 
 ##################################################################
@@ -167,21 +184,25 @@ REPLAY_MEMORY_SIZE = 100000
 DOUBLE_DQN = False
 EPSILON = 1.0
 GAMMA = 0.99
-ANNEAL_TO = 0.1
-ANNEAL_OVER = 1000000   # time steps
+ANNEAL_TO = 0.02
+ANNEAL_OVER = 100000   # time steps
 ANNEAL_STEP = (EPSILON - ANNEAL_TO) / ANNEAL_OVER
 NUM_EPISODES = 10000000
-NUM_WARMSTART = 0      # episodes
+NUM_WARMSTART = 35      # episodes
 MAX_NOOP_ITERS = 30
 TARGET_UPDATE = 10000     # time steps
-PROGRESS_INTERVAL = 1   # episodes
+PROGRESS_INTERVAL = 10   # episodes
 
 policy_net = DQN().to(device)
 target_net = DQN().to(device)
 target_net.load_state_dict(policy_net.state_dict())
 target_net.eval()
 
-optimizer = optim.RMSprop(policy_net.parameters(), lr=0.00025, momentum=0.95, eps=0.01)
+#optimizer = optim.RMSprop(policy_net.parameters(), lr=0.00025, momentum=0.95, eps=0.01)
+#optimizer = optim.RMSprop(policy_net.parameters(), lr=0.00005)
+#optimizer = optim.Adam(policy_net.parameters(), lr=0.0001) #7
+#optimizer = optim.RMSprop(policy_net.parameters(),  lr=0.0025, alpha=0.9, eps=1e-02, momentum=0.0) #8
+optimizer = optim.RMSprop(policy_net.parameters(),  lr=0.00025, alpha=0.95, eps=0.01, momentum=0.0) #9
 memory = ReplayMemory(REPLAY_MEMORY_SIZE)
 
 # Select an action randomly without annealing EPSILON
@@ -272,12 +293,13 @@ class Stats:
         self.hard_reset()
 
     def hard_reset(self):
-        self.best_total_reward = 0
+        self.best_total_reward = -100000000
         self.total_iter_count = 0
         self.reset()
 
     def reset(self):
         self.episode_count = 0
+        self.iter_count = 0
         self.success_count = 0
         self.volley_success_count = 0
         self.total_volley_count = 0
@@ -313,6 +335,7 @@ for i_episode in range(NUM_WARMSTART + NUM_EPISODES):
     # Run time steps until someone wins the game
     for t in count():
         # Increment iteration count
+        stats.iter_count += 1
         stats.total_iter_count += 1
 
         # ******** Select an action ********
@@ -386,13 +409,14 @@ for i_episode in range(NUM_WARMSTART + NUM_EPISODES):
         print("Iteration:", stats.total_iter_count)
         print("Volley Success: {}/{} = {}".format(stats.volley_success_count, stats.total_volley_count, stats.volley_success_count/stats.total_volley_count))
         print("Game Success: {}/{} = {}".format(stats.success_count, PROGRESS_INTERVAL, stats.success_count/PROGRESS_INTERVAL))
-        print("Avg. iters per episode:", stats.total_iter_count/PROGRESS_INTERVAL)
+        print("Avg. iters per episode:", stats.iter_count/PROGRESS_INTERVAL)
         print("Total reward:", stats.total_reward)
         print("Avg. loss:", stats.total_loss/stats.total_iter_count)
         print("Action counts:")
         for i in range(NUM_ACTIONS):
             print("{}:{}".format(i, stats.action_counts[i]))
         print("*************************************")
+        print("Memory size:", len(memory))
 
         # Write csv row
         if WRITE_CSV:
@@ -400,7 +424,7 @@ for i_episode in range(NUM_WARMSTART + NUM_EPISODES):
                                  'iteration': stats.total_iter_count,
                                  'volley_success_rate': stats.volley_success_count/stats.total_volley_count,
                                  'game_success_rate': stats.success_count/PROGRESS_INTERVAL,
-                                 'avg_iters_per_episode': stats.total_iter_count/PROGRESS_INTERVAL,
+                                 'avg_iters_per_episode': stats.iter_count/PROGRESS_INTERVAL,
                                  'total_reward': stats.total_reward,
                                  'avg_loss': stats.total_loss/stats.total_iter_count,
                                  '0': stats.action_counts[0],
