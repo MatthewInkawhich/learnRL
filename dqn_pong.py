@@ -17,11 +17,12 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import torchvision.transforms as T
+import models
 
 ##################################################################
 ### Initialize Enviroment
 ##################################################################
-RUN_NAME = "dqn_pong_9"
+RUN_NAME = "dqn_pong_10_3"
 # Initialize gym environment
 env = gym.make('Pong-v0')
 # print(env.action_space)
@@ -102,23 +103,23 @@ class ReplayMemory(object):
 #        return x    # return Q values of each action
 
 
-class DQN(nn.Module):
-    def __init__(self):
-        super(DQN, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels=FRAME_HISTORY_SIZE, out_channels=32, kernel_size=8, stride=4)
-        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)
-        self.conv3 = nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1)
-        self.fc1 = nn.Linear(in_features=64*7*7 , out_features=512)
-        self.fc2 = nn.Linear(in_features=512, out_features=NUM_ACTIONS)
-
-    def forward(self, x):
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        x = F.relu(self.conv3(x))
-        x = x.view(-1, 64 * 7 * 7)
-        x = F.relu(self.fc1(x))
-        x = self.fc2(x)
-        return x    # return Q values of each action
+#class DQN(nn.Module):
+#    def __init__(self):
+#        super(DQN, self).__init__()
+#        self.conv1 = nn.Conv2d(in_channels=FRAME_HISTORY_SIZE, out_channels=32, kernel_size=8, stride=4)
+#        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)
+#        self.conv3 = nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1)
+#        self.fc1 = nn.Linear(in_features=64*7*7 , out_features=512)
+#        self.fc2 = nn.Linear(in_features=512, out_features=NUM_ACTIONS)
+#
+#    def forward(self, x):
+#        x = F.relu(self.conv1(x))
+#        x = F.relu(self.conv2(x))
+#        x = F.relu(self.conv3(x))
+#        x = x.view(-1, 64 * 7 * 7)
+#        x = F.relu(self.fc1(x))
+#        x = self.fc2(x)
+#        return x    # return Q values of each action
 
 ##################################################################
 ### Frame processing
@@ -190,19 +191,19 @@ ANNEAL_STEP = (EPSILON - ANNEAL_TO) / ANNEAL_OVER
 NUM_EPISODES = 10000000
 NUM_WARMSTART = 35      # episodes
 MAX_NOOP_ITERS = 30
-TARGET_UPDATE = 10000     # time steps
+TARGET_UPDATE = 1000     # time steps
 PROGRESS_INTERVAL = 10   # episodes
 
-policy_net = DQN().to(device)
-target_net = DQN().to(device)
+policy_net = models.DQN(FRAME_HISTORY_SIZE, NUM_ACTIONS).to(device)
+target_net = models.DQN(FRAME_HISTORY_SIZE, NUM_ACTIONS).to(device)
 target_net.load_state_dict(policy_net.state_dict())
 target_net.eval()
 
 #optimizer = optim.RMSprop(policy_net.parameters(), lr=0.00025, momentum=0.95, eps=0.01)
 #optimizer = optim.RMSprop(policy_net.parameters(), lr=0.00005)
 #optimizer = optim.Adam(policy_net.parameters(), lr=0.0001) #7
-#optimizer = optim.RMSprop(policy_net.parameters(),  lr=0.0025, alpha=0.9, eps=1e-02, momentum=0.0) #8
-optimizer = optim.RMSprop(policy_net.parameters(),  lr=0.00025, alpha=0.95, eps=0.01, momentum=0.0) #9
+optimizer = optim.RMSprop(policy_net.parameters(),  lr=0.0025, alpha=0.9, eps=1e-02, momentum=0.0) #8
+#optimizer = optim.RMSprop(policy_net.parameters(),  lr=0.00025, alpha=0.95, eps=0.01, momentum=0.0) #9
 memory = ReplayMemory(REPLAY_MEMORY_SIZE)
 
 # Select an action randomly without annealing EPSILON
