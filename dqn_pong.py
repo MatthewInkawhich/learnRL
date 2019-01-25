@@ -22,7 +22,7 @@ import models
 ##################################################################
 ### Initialize Enviroment
 ##################################################################
-RUN_NAME = "dqn_pong_10_3"
+RUN_NAME = "dqn_pong_tll_ddqn"
 # Initialize gym environment
 env = gym.make('Pong-v0')
 # print(env.action_space)
@@ -82,44 +82,6 @@ class ReplayMemory(object):
         return len(self.memory)
 
 
-
-##################################################################
-### Define Model
-##################################################################
-#class DQN(nn.Module):
-#    def __init__(self):
-#        super(DQN, self).__init__()
-#        self.conv1 = nn.Conv2d(in_channels=FRAME_HISTORY_SIZE, out_channels=16, kernel_size=8, stride=4)
-#        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=4, stride=2)
-#        self.fc1 = nn.Linear(in_features=32*9*9 , out_features=256)
-#        self.fc2 = nn.Linear(in_features=256, out_features=NUM_ACTIONS)
-#
-#    def forward(self, x):
-#        x = F.relu(self.conv1(x))
-#        x = F.relu(self.conv2(x))
-#        x = x.view(-1, 32 * 9 * 9)
-#        x = F.relu(self.fc1(x))
-#        x = self.fc2(x)
-#        return x    # return Q values of each action
-
-
-#class DQN(nn.Module):
-#    def __init__(self):
-#        super(DQN, self).__init__()
-#        self.conv1 = nn.Conv2d(in_channels=FRAME_HISTORY_SIZE, out_channels=32, kernel_size=8, stride=4)
-#        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)
-#        self.conv3 = nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1)
-#        self.fc1 = nn.Linear(in_features=64*7*7 , out_features=512)
-#        self.fc2 = nn.Linear(in_features=512, out_features=NUM_ACTIONS)
-#
-#    def forward(self, x):
-#        x = F.relu(self.conv1(x))
-#        x = F.relu(self.conv2(x))
-#        x = F.relu(self.conv3(x))
-#        x = x.view(-1, 64 * 7 * 7)
-#        x = F.relu(self.fc1(x))
-#        x = self.fc2(x)
-#        return x    # return Q values of each action
 
 ##################################################################
 ### Frame processing
@@ -182,7 +144,7 @@ def prep_state_for_model(state):
 ##################################################################
 BATCH_SIZE = 32
 REPLAY_MEMORY_SIZE = 100000
-DOUBLE_DQN = False
+DOUBLE_DQN = True
 EPSILON = 1.0
 GAMMA = 0.99
 ANNEAL_TO = 0.02
@@ -257,8 +219,10 @@ def optimize_model():
 
     # Cast and normalize non_final_next_states before forwarding thru target_net
     non_final_next_states = prep_state_for_model(non_final_next_states)
+    # Initialize next state Q values as zeros
+    next_state_q_values = torch.zeros(BATCH_SIZE, device=device)
+
     if DOUBLE_DQN:
-        next_state_q_values = torch.zeros(BATCH_SIZE, device=device)
         # Compute argmax Q(s', a) (using policy net) for Double DQN
         # Note that the argmax is stored in .max(1)[1]
         with torch.no_grad():
@@ -266,7 +230,6 @@ def optimize_model():
         # Use Q values from the target network that correspond to the action that the policy Q-net chose
         next_state_q_values[non_final_mask] = target_net(non_final_next_states).gather(1, next_policy_net_choices.unsqueeze(1)).squeeze().detach()
     else:
-        next_state_q_values = torch.zeros(BATCH_SIZE, device=device)
         # Compute V(s_{t+1}) for all next states. Note that V(s_{t+1}) = max(Q(s',a))
         next_state_q_values[non_final_mask] = target_net(non_final_next_states).max(1)[0].detach()
 
@@ -360,10 +323,12 @@ for i_episode in range(NUM_WARMSTART + NUM_EPISODES):
         #frame_buffer.plot()
 
         # ******** Configure next_state ********
-        if done:
-            next_state = None
-        else:
-            next_state = frame_buffer.get_frame_tensor()
+        #if done or reward < 0:  # show terminal on loss of life 
+        #if done: 
+        #    next_state = None
+        #else:
+        #    next_state = frame_buffer.get_frame_tensor()
+        next_state = frame_buffer.get_frame_tensor()
 
         # ******** Update stats if volley is over ********
         if reward != 0:
@@ -376,9 +341,13 @@ for i_episode in range(NUM_WARMSTART + NUM_EPISODES):
             stats.total_reward += reward.item()
 
         # ******** Store the transition in memory ********
-        memory.push(state, action, next_state, reward)
+        if done or reward < 0:
+            memory.push(state, action, None, reward)
+        else:
+            memory.push(state, action, next_state, reward)
 
         # ******** Update state ********
+        #state = frame_buffer.get_frame_tensor()  
         state = next_state
 
         # ******** Perform an optimization step if not in the warmstart stage ********
